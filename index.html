@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cobrinha</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+        }
+
+        body {
+            overflow: hidden;
+        }
+
+        #board-container {
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: white;
+        }
+
+        #board {
+            justify-content: center;
+            align-content: center;
+            display: grid;
+            width: 100%;
+            height: 100%;
+            max-width: 90vmin;
+            max-height: 90vmin;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="board-container">
+        <div id="board"></div>
+    </div>
+
+    <script>
+        const cols = 18;
+        const rows = 10;
+        const grid = [];
+
+        //setting Board Up
+        const boardElement = document.getElementById("board");
+        boardElement.style.gridTemplateColumns = `repeat(${cols}, ${100 / Math.max(cols, rows)}%)`;
+        boardElement.style.gridTemplateRows = `repeat(${rows}, ${100 / Math.max(cols, rows)}%)`;
+
+        for (let i = 0; i < rows * cols; i++) {
+            const tile = document.createElement("div");
+            grid.push(tile);
+            tile.className = "tile";
+            boardElement.appendChild(tile);
+        }
+
+        const tiles = document.querySelectorAll(".tile");
+
+        const UI = {
+            snakeColor: "#A1DD70",
+            appleEatenColor: "#799351",
+            appleColor: "#EE4E4E",
+            tileBackground: "#EEEEEE",
+            tileBorder: "0.5px solid white",
+        };
+        const gameSpeed = 100;
+        let gameRunning = false;
+        const UP = "ArrowUp",
+            DOWN = "ArrowDown",
+            LEFT = "ArrowLeft",
+            RIGHT = "ArrowRight";
+        let snake = [];
+        let apple = {};
+        let head = null;
+        let lastProcessedInput = null;
+        const inputList = [];
+
+        function clearBoard() {
+            tiles.forEach((x) => {
+                x.style.background = UI.tileBackground;
+                // x.style.border = UI.tileBorder;
+            });
+        }
+
+        //game logic and render
+
+        const snakeGrowTriggerTilesIndexes = [];
+        const snakeFilledTilesIndex = [];
+        let newSnakePiece = null;
+        let skipNewPieceMovement = false;
+        function renderSnake() {
+            snakeFilledTilesIndex.forEach(index => {
+                grid[index].style.background = UI.tileBackground;
+                // grid[index].style.border = UI.tileBorder;
+            });
+            const currentSnakePositions = [];
+
+
+            snakeFilledTilesIndex.length = 0;
+            if (newSnakePiece) {
+                snake.push(newSnakePiece);
+                newSnakePiece = null;
+                skipNewPieceMovement = true;
+            }
+
+            snake.forEach((piece, i) => {
+                if (i === snake.length - 1 && skipNewPieceMovement) {
+                    skipNewPieceMovement = false;
+                } else {
+                    switchPiecePosition(piece, i ? snake[i - 1] : null);
+                }
+                gridIndex = getIndexByCoordinates(piece.x, piece.y, cols);
+                snakeFilledTilesIndex.push(gridIndex);
+                const div = grid[gridIndex];
+                div.style.background = UI.snakeColor;
+                if (i % 2 !== 0) {
+                    div.style.background = '#9FD474'
+                }
+            });
+            lastProcessedInput = head.direction;
+            const headGridIndex = getIndexByCoordinates(head.x, head.y, cols);
+
+            if (hasDuplicates(snakeFilledTilesIndex)) {
+                let message = "Game over with " + (snake.length - 3) + " points.";
+                let highScore = localStorage.getItem("highScore") ?? 0;
+                if (snake.length > highScore) {
+                    message += " New high-score!";
+                    localStorage.setItem("highScore", snake.length - 3);
+                } else {
+                    message += " Your high-score is " + highScore + " points.";
+                }
+
+                gameRunning = false;
+                alert(message);
+                setup();
+            }
+
+            snakeGrowTriggerTilesIndexes.forEach((index) => {
+                grid[index].style.background = UI.appleEatenColor;
+            });
+
+            const tail = snake.at(-1);
+            const tailGridIndex = tail.y * cols + tail.x;
+            if (snakeGrowTriggerTilesIndexes[0] === tailGridIndex) {
+                newSnakePiece = { ...tail };
+                let i = snakeGrowTriggerTilesIndexes.shift();
+            }
+        }
+
+        function switchPiecePosition(piece, pieceAhead) {
+            if (piece.nextLoopDirection) {
+                piece.direction = piece.nextLoopDirection;
+            }
+            piece.nextLoopDirection = null;
+            switch (piece.direction) {
+                case RIGHT:
+                    piece.x++;
+                    break;
+                case DOWN:
+                    piece.y++;
+                    break;
+                case UP:
+                    piece.y--;
+                    break;
+                case LEFT:
+                    piece.x--;
+                    break;
+            }
+
+            if (piece.x === -1) {
+                piece.x = cols - 1;
+            }
+            if (piece.x === cols) {
+                piece.x = 0;
+            }
+            if (piece.y === -1) {
+                piece.y = rows - 1;
+            }
+            if (piece.y === rows) {
+                piece.y = 0;
+            }
+
+            if (pieceAhead && pieceAhead.direction !== piece.direction) {
+                piece.nextLoopDirection = pieceAhead.direction;
+            }
+        }
+
+        let previousApplePosition = null;
+        function renderApple() {
+            if (previousApplePosition !== null) {
+                grid[previousApplePosition].style.background = UI.tileBackground;
+                grid[previousApplePosition].style.border = UI.tileBorder;
+            }
+
+            const headGridIndex = getIndexByCoordinates(head.x, head.y, cols);
+            if (headGridIndex === apple.gridIndex) {
+                snakeGrowTriggerTilesIndexes.push(apple.gridIndex);
+                const emptySpots = filterArray(
+                    grid.length - 1,
+                    snakeFilledTilesIndex
+                );
+                const randomIndex = Math.floor(Math.random() * emptySpots.length);
+                apple.gridIndex = emptySpots[randomIndex];
+                const { x, y } = getCoordinatesByIndex(apple.gridIndex, cols);
+                apple.x = x;
+                apple.y = y;
+            }
+
+            grid[apple.gridIndex].style.background = UI.appleColor;
+        }
+
+        //game loop
+        let lastFrameTime = performance.now();
+        function gameLoop() {
+            if (gameRunning) {
+                window.requestAnimationFrame(gameLoop);
+            }
+            const now = performance.now();
+            const delta = now - lastFrameTime;
+            if (delta >= gameSpeed) {
+                lastFrameTime = now;
+                handleInput();
+                renderSnake();
+                renderApple();
+            }
+        }
+
+        function setup() {
+            gameRunning = true;
+            clearBoard();
+            snake = [
+                { x: 9, y: 6, direction: UP },
+                { x: 9, y: 7, direction: UP },
+                { x: 9, y: 8, direction: UP },
+            ];
+            head = snake[0];
+            apple = {
+                x: 4,
+                y: 3,
+                gridIndex: getIndexByCoordinates(4, 3, cols),
+            };
+            inputList.length = 0;
+            lastProcessedInput = null;
+            requestAnimationFrame(gameLoop);
+            snakeGrowTriggerTilesIndexes.length = 0;
+        }
+        setup();
+
+        //user input handling
+
+        document.addEventListener("keydown", function (event) {
+            if ([UP, DOWN, LEFT, RIGHT].includes(event.key)) {
+                if (inputList.length < 3) {
+                    inputList.push(event.key);
+                }
+            }
+        });
+
+        let startX,
+            startY = 0;
+
+        document.addEventListener("touchstart", function (event) {
+            startX = event.touches[0].clientX;
+            startY = event.touches[0].clientY;
+        });
+
+        document.addEventListener("touchend", function (event) {
+            let endX = event.changedTouches[0].clientX;
+            let endY = event.changedTouches[0].clientY;
+            let diffX = startX - endX;
+            let diffY = startY - endY;
+            if (inputList.length < 3) {
+                let input = "";
+
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    if (diffX > 0) {
+                        input = LEFT;
+                    } else {
+                        input = RIGHT;
+                    }
+                } else {
+                    if (diffY > 0) {
+                        input = UP;
+                    } else {
+                        input = DOWN;
+                    }
+                }
+                inputList.push(input);
+            }
+        });
+
+        function handleInput() {
+            if (!inputList.length) {
+                return;
+            }
+            input = inputList.shift();
+            const inverse = {
+                [UP]: DOWN,
+                [DOWN]: UP,
+                [RIGHT]: LEFT,
+                [LEFT]: RIGHT,
+            };
+            if (lastProcessedInput === inverse[input]) {
+                return;
+            }
+            head.direction = input;
+        }
+
+        //util
+        function hasDuplicates(array) {
+            const seen = new Set();
+            for (let num of array) {
+                if (seen.has(num)) {
+                    return num;
+                }
+                seen.add(num);
+            }
+            return false;
+        }
+
+        function filterArray(maxNumber, numbersToRemove) {
+            let resultArray = Array.from({ length: maxNumber + 1 }, (_, i) => i);
+
+            resultArray = resultArray.filter(
+                (num) => !numbersToRemove.includes(num)
+            );
+
+            return resultArray;
+        }
+        //Row-Major Order Indexing
+        function getCoordinatesByIndex(index, width) {
+            const y = Math.floor(index / width);
+            const x = index % width;
+            return { x, y };
+        }
+        function getIndexByCoordinates(x, y, width) {
+            return y * width + x;
+        }
+    </script>
+</body>
+
+</html>
